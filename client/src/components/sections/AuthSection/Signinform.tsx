@@ -5,7 +5,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form } from "@/components/ui/form";
 import { Button } from "@/components/ui/button";
-import OAuth from "@/components/sections/AuthSection/OAuth";
 import AuthFormInputField from "@/components/ui/authFormInputField";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -85,8 +84,6 @@ const SigninForm = () => {
         <span className="px-3">or</span>
         <span className="h-px w-full bg-gray-600"></span>
       </div>
-
-      <OAuth />
 
       <p className="text-sm text-gray-400 text-center mt-4">
         Not registered yet?{" "}
