@@ -1,0 +1,45 @@
+package repositories
+
+import (
+	"log/slog"
+
+	"github.com/Suplice/CodeQuest/internal/models"
+	"github.com/Suplice/CodeQuest/internal/utils/constants"
+	"gorm.io/gorm"
+)
+
+type UserRepository struct {
+	db *gorm.DB
+	logger *slog.Logger
+}
+
+func NewUserRepository(db *gorm.DB, logger *slog.Logger) *UserRepository {
+	return &UserRepository{db, logger}
+}
+
+
+func (ur *UserRepository) GetUserByEmail(email string) (*models.User, error) {
+
+	var user *models.User
+
+	result := ur.db.Where("email = ?", email).First(&user)
+
+	if result.Error != nil {
+		return nil, constants.ParseDBError(result.Error, "user")
+	}
+
+	return user, nil
+
+}
+
+func (ur *UserRepository) GetUserById(id uint) (*models.User, error){
+	var user *models.User
+
+	result := ur.db.Where("ID = ?", id).First(&user)
+
+	if result.Error != nil {
+		return nil, constants.ParseDBError(result.Error, "user")
+	}
+
+	return user, nil
+}
