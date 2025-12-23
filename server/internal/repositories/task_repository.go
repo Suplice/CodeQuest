@@ -301,3 +301,32 @@ func (tr *TaskRepository) checkAndAwardBadges(db *gorm.DB, userID uint) error {
 	}
 	return nil
 }
+
+
+func (tr *TaskRepository) GetUnfinishedTasks(userID uint64) ([]TaskForUser, error) {
+    var tasks []models.Task
+    
+    err := tr.db.
+        Preload("TaskQuestions").
+        Where("id NOT IN (?)", tr.db.Table("user_task_progresses").Select("task_id").Where("user_id = ? AND is_completed = ?", userID, true)).
+        Where("is_active = ?", true).
+        Find(&tasks).Error
+
+    if err != nil {
+        return nil, err
+    }
+
+    result := make([]TaskForUser, len(tasks))
+    for i, t := range tasks {
+        result[i] = TaskForUser{
+            ID: t.ID, 
+            Title: t.Title,
+            Type: t.Type,
+            Language: t.Language,
+            Difficulty: t.Difficulty,
+            XP: t.XP,
+            Points: t.Points,
+        }
+    }
+    return result, nil
+}

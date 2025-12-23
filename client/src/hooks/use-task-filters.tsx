@@ -4,6 +4,8 @@ import { useMemo, useState, useEffect } from "react";
 import { Task } from "@/lib/types/task";
 import { User } from "@/lib/types/user";
 
+const API_URL = "http://localhost:5000";
+
 type StoredFilters = {
   type?: string;
   lang?: string;
@@ -51,25 +53,6 @@ const saveFiltersToStorage = (
   }
 };
 
-const SCORE_WEIGHTS = {
-  NOT_ATTEMPTED_BONUS: 50,
-  DIFFICULTY_MATCH_BONUS: 25,
-  DIFFICULTY_ADJACENT_BONUS: 10,
-  MISTAKE_PENALTY: -5,
-  ATTEMPT_PENALTY: -2,
-};
-
-const getTargetDifficulty = (level: number): ("EASY" | "MEDIUM" | "HARD")[] => {
-  if (level <= 2) return ["EASY"];
-  if (level <= 4) return ["EASY", "MEDIUM"];
-  return ["EASY", "MEDIUM", "HARD"];
-};
-const getIdealDifficulty = (level: number): "EASY" | "MEDIUM" | "HARD" => {
-  if (level <= 2) return "EASY";
-  if (level <= 4) return "MEDIUM";
-  return "HARD";
-};
-
 export function useTaskFilters(tasks: Task[], user: User | null) {
   const userId = user?.ID;
 
@@ -83,9 +66,13 @@ export function useTaskFilters(tasks: Task[], user: User | null) {
   const [hideCompleted, setHideCompleted] = useState(
     initialFilters.hideCompleted || false
   );
+
   const [recommendationFilter, setRecommendationFilter] = useState<
     "all" | "recommended"
   >(initialFilters.show || "all");
+
+  const [recommendedTasks, setRecommendedTasks] = useState<Task[]>([]);
+  const [isLoadingRecs, setIsLoadingRecs] = useState(false);
 
   useEffect(() => {
     const currentFilters: StoredFilters = {
@@ -109,6 +96,39 @@ export function useTaskFilters(tasks: Task[], user: User | null) {
     userId,
   ]);
 
+  useEffect(() => {
+    const fetchRecommendations = async () => {
+      if (recommendationFilter === "recommended" && userId) {
+        setIsLoadingRecs(true);
+        try {
+          const response = await fetch(`${API_URL}/tasks/recommended`, {
+            method: "GET",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            credentials: "include",
+          });
+
+          if (!response.ok) {
+            throw new Error(
+              `Error fetching recommendations: ${response.statusText}`
+            );
+          }
+
+          const data = await response.json();
+          setRecommendedTasks(data);
+        } catch (error) {
+          console.error("Failed to fetch recommended tasks:", error);
+          setRecommendedTasks([]);
+        } finally {
+          setIsLoadingRecs(false);
+        }
+      }
+    };
+
+    fetchRecommendations();
+  }, [recommendationFilter, userId]);
+
   const clearFilters = () => {
     setTypeFilter("");
     setLangFilter("");
@@ -123,70 +143,26 @@ export function useTaskFilters(tasks: Task[], user: User | null) {
   };
 
   const filteredTasks = useMemo(() => {
-    let result = [...tasks];
+    let result =
+      recommendationFilter === "recommended"
+        ? [...recommendedTasks]
+        : [...tasks];
 
-    if (recommendationFilter === "recommended" && user) {
-      const targetDifficulties = getTargetDifficulty(user.level);
-      const idealDifficulty = getIdealDifficulty(user.level);
+    if (typeFilter) result = result.filter((t) => t.type === typeFilter);
+    if (langFilter) result = result.filter((t) => t.language === langFilter);
 
-      result = result
-        .filter((t) => {
-          if (t.user_progress?.is_completed) return false;
-          return targetDifficulties.includes(t.difficulty);
-        })
-        .map((t) => {
-          let score = 0;
-          const progress = t.user_progress;
+    if (diffFilter) result = result.filter((t) => t.difficulty === diffFilter);
 
-          if (!progress || progress.attempts === 0) {
-            score += SCORE_WEIGHTS.NOT_ATTEMPTED_BONUS;
-          } else if (!progress.is_completed) {
-            score += (progress.mistakes || 0) * SCORE_WEIGHTS.MISTAKE_PENALTY;
-            score +=
-              Math.max(0, (progress.attempts || 0) - 1) *
-              SCORE_WEIGHTS.ATTEMPT_PENALTY;
-          }
-
-          if (t.difficulty === idealDifficulty) {
-            score += SCORE_WEIGHTS.DIFFICULTY_MATCH_BONUS;
-          } else {
-            const diffMap = { EASY: 1, MEDIUM: 2, HARD: 3 };
-            if (
-              Math.abs(diffMap[t.difficulty] - diffMap[idealDifficulty]) === 1
-            ) {
-              score += SCORE_WEIGHTS.DIFFICULTY_ADJACENT_BONUS;
-            }
-          }
-
-          score += (Math.random() - 0.5) * 0.1;
-          score += t.xp * 0.1;
-
-          return { ...t, recommendationScore: score };
-        })
-        .sort((a, b) => b.recommendationScore - a.recommendationScore);
-
-      if (typeFilter) result = result.filter((t) => t.type === typeFilter);
-      if (langFilter) result = result.filter((t) => t.language === langFilter);
-      if (searchQuery)
-        result = result.filter((t) =>
-          t.title.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-    } else {
-      if (typeFilter) result = result.filter((t) => t.type === typeFilter);
-      if (langFilter) result = result.filter((t) => t.language === langFilter);
-      if (diffFilter)
-        result = result.filter((t) => t.difficulty === diffFilter);
-      if (searchQuery)
-        result = result.filter((t) =>
-          t.title.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-    }
+    if (searchQuery)
+      result = result.filter((t) =>
+        t.title.toLowerCase().includes(searchQuery.toLowerCase())
+      );
 
     if (hideCompleted) {
       result = result.filter((t) => !t.user_progress?.is_completed);
     }
 
-    if (recommendationFilter === "all") {
+    if (sortBy) {
       switch (sortBy) {
         case "xp_asc":
           result.sort((a, b) => a.xp - b.xp);
@@ -220,21 +196,18 @@ export function useTaskFilters(tasks: Task[], user: User | null) {
         case "alpha_desc":
           result.sort((a, b) => b.title.localeCompare(a.title));
           break;
-        default:
-          if (!sortBy) {
-            result.sort(
-              (a, b) =>
-                new Date(b.created_at).getTime() -
-                new Date(a.created_at).getTime()
-            );
-          }
-          break;
       }
+    } else if (recommendationFilter === "all") {
+      result.sort(
+        (a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
     }
 
     return result;
   }, [
     tasks,
+    recommendedTasks,
     typeFilter,
     langFilter,
     diffFilter,
@@ -242,7 +215,6 @@ export function useTaskFilters(tasks: Task[], user: User | null) {
     searchQuery,
     hideCompleted,
     recommendationFilter,
-    user,
   ]);
 
   return {
@@ -267,5 +239,6 @@ export function useTaskFilters(tasks: Task[], user: User | null) {
       setRecommendationFilter,
     },
     clearFilters,
+    isLoadingRecs,
   };
 }
